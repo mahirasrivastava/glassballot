@@ -10,6 +10,7 @@ python3 scripts/run_demo.py --voters 10          # full election, writes out/boa
 python3 scripts/verify_board.py out/board.jsonl  # public verifier: board file only, no keys
 python3 scripts/attack_demo.py                   # 8 attacks, each shown being caught
 python3 -m unittest discover -s tests -t .       # 33 tests, ~4 s
+python3 scripts/serve.py                         # web booth on http://127.0.0.1:8000
 ```
 
 ## Layout
@@ -33,7 +34,10 @@ glassballot/
     service.py                  accept/reject logic (the future Flask API wraps this)
     verifier.py          (M6)   independent re-check of everything on the board
   simulation.py                 wires a whole election together
-scripts/                        run_demo.py, verify_board.py, attack_demo.py
+  web/
+    server.py                   stdlib HTTP API around service.py (stand-in for Flask)
+    static/                     voting booth, bulletin board viewer, tally + verifier UI
+scripts/                        run_demo.py, verify_board.py, attack_demo.py, serve.py
 tests/                          test_crypto.py, test_election.py
 ```
 
@@ -62,7 +66,8 @@ Ballots are signed by the voter. credential_id = SHA-256 of the voter's public k
 ## Not built yet (next phases)
 
 - Flask REST API around `service.py`, and a PostgreSQL board with an append-only trigger
-- HTML/JS voting booth (must reproduce `encoding.py` exactly for hashes to match)
+- In-browser ballot encryption for the voting booth (must reproduce `encoding.py` exactly for hashes
+  to match); today `serve.py` encrypts on the voter's behalf and keeps one election in memory
 - Docker, CI, benchmarks
 
 ## Limitations

@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Glass Ballot</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap top-inner">
+      <div class="brand">
+        <span class="logo" aria-hidden="true">◇</span>
+        <div>
+          <h1>Glass Ballot</h1>
+          <p class="sub">Encrypted voting with a public audit trail</p>
+        </div>
+      </div>
+      <div class="status" id="status"></div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div class="toast" id="toast" role="status" hidden></div>
+
+    <!-- Setup -->
+    <section class="card" id="setup">
+      <h2><span class="step">1</span> Key ceremony</h2>
+      <p class="hint">Generates the trustee's Paillier key and the authority's RSA key, then issues a signed
+        credential to each voter. Starting a new election discards the current one.</p>
+      <form id="setup-form" class="grid-form">
+        <label>Title
+          <input name="title" value="Student council election" maxlength="80">
+        </label>
+        <label>Candidates <small>one per line</small>
+          <textarea name="candidates" rows="3">Alice
+Bob
+Carol</textarea>
+        </label>
+        <div class="row">
+          <label>Voters
+            <input name="voters" type="number" min="1" max="50" value="5">
+          </label>
+          <label>Paillier key
+            <select name="paillier_bits">
+              <option value="2048">2048-bit</option>
+              <option value="1024">1024-bit (faster, demo only)</option>
+            </select>
+          </label>
+        </div>
+        <button class="btn primary" type="submit">Create election</button>
+      </form>
+    </section>
+
+    <div id="election" hidden>
+      <div class="cols">
+        <!-- Booth -->
+        <section class="card" id="booth">
+          <h2><span class="step">2</span> Voting booth</h2>
+          <form id="vote-form">
+            <label>Voting as
+              <select name="voter" id="voter-select"></select>
+            </label>
+            <fieldset class="choices" id="choices"></fieldset>
+            <button class="btn primary" type="submit" id="cast-btn">Encrypt &amp; cast ballot</button>
+            <p class="hint">Your choice is encrypted as one ciphertext per candidate, with zero-knowledge proofs
+              that each holds 0 or 1 and that they add up to 1. In this demo the server encrypts on the voter's behalf;
+              in-browser encryption is the next phase.</p>
+          </form>
+          <div class="receipt" id="receipt" hidden>
+            <div class="receipt-label">Ballot accepted. Keep your receipt:</div>
+            <code id="receipt-value"></code>
+            <button class="btn small" type="button" id="copy-receipt">Copy</button>
+          </div>
+        </section>
+
+        <!-- Roll -->
+        <section class="card">
+          <h2>Voter roll</h2>
+          <table class="roll">
+            <thead><tr><th>Voter</th><th>Credential</th><th>Status</th></tr></thead>
+            <tbody id="roll"></tbody>
+          </table>
+        </section>
+      </div>
+
+      <!-- Tally -->
+      <section class="card" id="tally">
+        <h2><span class="step">3</span> Close, tally and audit</h2>
+        <div id="tally-open">
+          <p class="hint">Closing multiplies all ballots together (the product decrypts to the sum), and the trustee
+            decrypts each candidate's total once, with a proof that the decryption is correct.</p>
+          <button class="btn danger" id="close-btn">Close election &amp; tally</button>
+        </div>
+        <div id="tally-done" hidden>
+          <div id="results" class="results"></div>
+          <div class="verify-bar">
+            <button class="btn primary" id="verify-btn">Run public verifier</button>
+            <span class="hint">Re-checks everything using only the bulletin board. No keys, no trust in the server.</span>
+          </div>
+          <ul class="checks" id="checks"></ul>
+        </div>
+        <form id="receipt-form" class="receipt-check">
+          <label>Check a receipt is on the board
+            <div class="inline">
+              <input name="receipt" placeholder="Paste a ballot receipt" autocomplete="off">
+              <button class="btn" type="submit">Find</button>
+            </div>
+          </label>
+          <p id="receipt-result" class="hint"></p>
+        </form>
+      </section>
+
+      <!-- Board -->
+      <section class="card">
+        <div class="card-head">
+          <h2>Bulletin board</h2>
+          <a class="btn small" href="/api/board.jsonl" download>Download board.jsonl</a>
+        </div>
+        <p class="hint">Append-only and hash-chained: each entry commits to the one before it, so editing, inserting
+          or deleting anything breaks the chain. Click an entry to see its contents.</p>
+        <ol class="board" id="board"></ol>
+      </section>
+    </div>
+  </main>
+
+  <div class="busy" id="busy" hidden>
+    <div class="busy-box"><div class="spinner"></div><span id="busy-text">Working…</span></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
