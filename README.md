@@ -10,6 +10,7 @@ share of the key**. Every step is posted on a hash-chained bulletin board that a
 ```bash
 python3 scripts/serve.py                         # web app on http://127.0.0.1:8000 (boards in out/glassballot.db)
 python3 scripts/serve.py --tls                   # same on https://127.0.0.1:8443 (self-signed certificate)
+python3 scripts/serve.py --organizer-key SECRET  # only holders of SECRET may start an election (or $GLASSBALLOT_ORGANIZER_KEY)
 open http://127.0.0.1:8000/learn.html            # animated "How it works" with live values
 
 python3 scripts/run_demo.py --voters 10          # whole election from the CLI, writes out/board.jsonl
@@ -18,7 +19,7 @@ python3 scripts/verify_board.py out/glassballot.db --list    # elections stored 
 python3 scripts/attack_demo.py                   # 10 attacks, each shown being caught
 python3 scripts/load_test.py --voters 200        # many concurrent voters (start the server with --rate 0)
 
-python3 -m unittest discover -s tests -t .       # 55 tests, ~7 s (JS cross-checks need node)
+python3 -m unittest discover -s tests -t .       # 58 tests, ~7 s (JS cross-checks need node)
 node tests/e2e/browser_flow.js http://127.0.0.1:8000 out/e2e   # whole election through the UI in headless Chrome
 ```
 
@@ -101,12 +102,12 @@ audits it. An audit reveals every rᵢ, and both the browser and the server's Py
 |---|---|
 | Confidentiality | encryption in the browser; only totals are decrypted; needs all k trustees |
 | Integrity | hash chain, database triggers and unique indexes, public verifier |
-| Authentication / eligibility | one-time codes (hashed), authority-signed credentials, signed ballots |
+| Authentication / eligibility | one-time codes (hashed), authority-signed credentials, signed ballots; an organizer key (stored hashed) guards starting an election on a public server |
 | One voter, one vote | service, SQLite unique index, verifier |
 | Ballot validity | 0-or-1 and sum ZK proofs bound to election and credential |
 | Accountability | everything signed and public, per-trustee partials on the board |
 | Universal / individual verifiability | `verify_board.py`; receipts plus the Benaloh audit |
-| Availability | proof checks in a process pool outside the lock, per-IP rate limit, body cap, cached verification, incremental board reads |
+| Availability | proof checks in a process pool outside the lock, per-IP rate limit (behind a proxy, keyed on the address the trusted proxy appended, never the client-supplied part of `X-Forwarded-For`), body cap, cached verification, incremental board reads |
 | Transport | optional HTTPS (TLS ≥ 1.2, HSTS), strict CSP, nosniff, frame-deny, no referrer |
 
 Measured on an 8-core laptop at 2048 bits: about 8 ballots/s accepted (about 28,000 per hour); 120 concurrent ballots verified by
@@ -119,4 +120,6 @@ the public verifier in 16 s. In the browser, a 2048-bit key takes about 0.25 s a
 - **k-of-k:** every trustee must take part. t-of-k (Shoup / Damgård–Jurik) needs safe primes and is future work.
 - **Demo convenience:** one browser can play every role, so its localStorage then holds every secret. Use separate devices for real.
 - Keys live in server memory, so an election still open when the server stops cannot be resumed (its board can still be verified).
-- Next steps: Flask/FastAPI + PostgreSQL deployment, Docker, CI.
+- **Hosted deploys:** set an organizer key (`render.yaml` generates `GLASSBALLOT_ORGANIZER_KEY`; on Fly use `fly secrets set`), otherwise
+  anyone who opens the site can replace the running election. Set `PROXY_HOPS` if more than one proxy appends to `X-Forwarded-For`.
+- Next steps: CI.

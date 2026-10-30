@@ -11,7 +11,7 @@ Who holds what (the server is never trusted with a vote or with the decryption k
 
 Endpoints (POST bodies are JSON objects):
     GET  /api/state                     public summary of the current election
-    POST /api/election                  {title, candidates[], voters, paillier_bits, trustees}
+    POST /api/election            [O]   {title, candidates[], voters, paillier_bits, trustees}
                                         -> admin token, registration codes, trustee shares (shown once)
     GET  /api/admin/roll          [A]   registration codes and their status
     POST /api/close               [A]   close the polls
@@ -26,6 +26,8 @@ Endpoints (POST bodies are JSON objects):
     GET  /api/elections                 every board stored in the SQLite database
     GET  /api/elections/<id>/verify | /board.jsonl
 [A] = needs the X-Admin-Token header.
+[O] = needs the X-Organizer-Key header when the server was started with an organizer key
+      (--organizer-key / $GLASSBALLOT_ORGANIZER_KEY). Without one, anyone may start an election (local demo).
 
 Ballot checks (~0.7 s each at 2048 bits) run in a process pool outside the lock;
 only "not yet voted -> append" is serialised. POSTs are rate-limited per client IP.
@@ -139,8 +141,9 @@ class HostedElection:
 class ElectionHost:
     """The current election plus the stored ones; every state change runs under one lock."""
 
-    def __init__(self, db_path=None, workers=0):
+    def __init__(self, db_path=None, workers=0, organizer_key=None):
         self.lock = threading.Lock()
+        self.organizer_digest = _digest(organizer_key) if organizer_key else None
         self.election = None
         self.db_path = db_path
         self.db = connect(db_path) if db_path else None
@@ -151,7 +154,7 @@ class ElectionHost:
     # ---------------------------------------------------------------- views
     def state(self) -> dict:
         el = self.election
-        base = {"storage": self._storage()}
+        base = {"storage": self._storage(), "organizer_key_required": self.organizer_digest is not None}
         if el is None:
             return {"phase": "none", **base}
         p = el.params
@@ -183,7 +186,14 @@ class ElectionHost:
         return el.board.entries(since=since)
 
     # -------------------------------------------------------------- authority
-    def create(self, body: dict) -> dict:
+    def check_organizer(self, key) -> None:
+        if self.organizer_digest is None:
+            return
+        if not isinstance(key, str) or not hmac.compare_digest(_digest(key), self.organizer_digest):
+            raise ApiError("starting an election needs the organizer key", HTTPStatus.FORBIDDEN)
+
+    def create(self, body: dict, organizer_key=None) -> dict:
+        self.check_organizer(organizer_key)
         title = str(body.get("title") or "").strip()[:80] or "Demo election"
         candidates = [str(c).strip()[:40] for c in body.get("candidates", []) if str(c).strip()]
         if len(candidates) < 2:
@@ -432,12 +442,19 @@ class Handler(SimpleHTTPRequestHandler):
     limiter = None   # RateLimiter
     tls = False
     proxy = False    # behind a TLS-terminating reverse proxy (Fly, Render, nginx): trust X-Forwarded-*
+    proxy_hops = 1   # how many trusted proxies append to X-Forwarded-For
 
     def client_ip(self) -> str:
+        """The client's IP for rate limiting. The leftmost X-Forwarded-For entry is whatever the client
+        sent, so it is never trusted: each trusted proxy appends the address it saw, and the entry
+        `proxy_hops` from the right is the last one written by a proxy we trust."""
         if self.proxy:
-            forwarded = self.headers.get("Fly-Client-IP") or self.headers.get("X-Forwarded-For", "")
-            if forwarded.strip():
-                return forwarded.split(",")[0].strip()
+            fly = self.headers.get("Fly-Client-IP", "").strip()   # set by Fly's edge, not the client
+            if fly:
+                return fly
+            hops = [h.strip() for h in self.headers.get("X-Forwarded-For", "").split(",") if h.strip()]
+            if len(hops) >= self.proxy_hops:
+                return hops[-self.proxy_hops]
         return self.client_address[0]
 
     def __init__(self, *args, **kwargs):
@@ -497,7 +514,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_POST(self):
         h = self.host
         routes = {
-            "/api/election": h.create,
+            "/api/election": lambda b: h.create(b, self.headers.get("X-Organizer-Key")),
             "/api/close": lambda _b: h.close(self.headers.get("X-Admin-Token")),
             "/api/register": h.register,
             "/api/audit": h.audit,
@@ -568,15 +585,18 @@ def _safe_int(s) -> int:
 
 
 def make_server(host="127.0.0.1", port=8000, db_path=None, workers=0, rate=20.0, burst=60,
-                certfile=None, keyfile=None, proxy=False) -> ThreadingHTTPServer:
+                certfile=None, keyfile=None, proxy=False, proxy_hops=1,
+                organizer_key=None) -> ThreadingHTTPServer:
     """db_path: SQLite file for the boards (None = memory). workers: processes that check ballots
     (0 = check in the request thread). rate/burst: POST limit per client IP (rate 0 = off).
-    certfile/keyfile: serve HTTPS."""
+    certfile/keyfile: serve HTTPS. proxy_hops: trusted proxies in front (with proxy=True).
+    organizer_key: if set, POST /api/election needs it in X-Organizer-Key."""
     handler = type("BoundHandler", (Handler,), {
-        "host": ElectionHost(db_path, workers),
+        "host": ElectionHost(db_path, workers, organizer_key),
         "limiter": RateLimiter(rate, burst),
         "tls": bool(certfile),
         "proxy": proxy,
+        "proxy_hops": max(1, int(proxy_hops)),
     })
     server = ThreadingHTTPServer((host, port), handler)
     server.daemon_threads = True

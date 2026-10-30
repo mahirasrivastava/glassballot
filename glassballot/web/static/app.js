@@ -214,6 +214,7 @@ setInterval(poll, 3000);
 function render() {
   const has = state.phase !== "none";
   $("setup").hidden = has && !showSetup;
+  $("organizer-field").hidden = !state.organizer_key_required;
   $("election").hidden = !has || showSetup;
   $("new-btn").hidden = !has || showSetup;
   $("cancel-setup").hidden = !has;
@@ -871,13 +872,15 @@ $("setup-form").addEventListener("submit", (ev) => {
     paillier_bits: Number(f.get("paillier_bits")),
   };
   if (body.candidates.length < 2) return toast("Enter at least two candidates", "error");
+  const organizerKey = String(f.get("organizer_key") || "");
+  if (state.organizer_key_required && !organizerKey) return toast("Enter the organizer key", "error");
   busy("Running the key ceremony", [
     `Generating the ${body.paillier_bits}-bit Paillier election key`,
     `Splitting its decryption exponent into ${plural(body.trustees, "trustee share")}, then deleting the key`,
     "Generating the authority's 2048-bit RSA signing key",
     `Creating ${plural(body.voters, "one-time registration code")}`,
   ], async () => {
-    const res = await api("/api/election", body);
+    const res = await api("/api/election", body, organizerKey ? { "X-Organizer-Key": organizerKey } : {});
     wallet.update(res.election_id, (w) => {
       w.admin_token = res.admin_token;
       w.shares = res.trustee_shares;

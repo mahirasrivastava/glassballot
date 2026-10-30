@@ -45,6 +45,10 @@ def main():
                     help="default $PORT, else 8000, or 8443 with --tls")
     ap.add_argument("--proxy", action="store_true",
                     help="behind a TLS-terminating proxy (Fly.io, Render, nginx): trust X-Forwarded-For/-Proto")
+    ap.add_argument("--proxy-hops", type=int, default=int(os.environ.get("PROXY_HOPS") or 1),
+                    help="trusted proxies that append to X-Forwarded-For (default $PROXY_HOPS, else 1)")
+    ap.add_argument("--organizer-key", default=os.environ.get("GLASSBALLOT_ORGANIZER_KEY") or None,
+                    help="secret needed to start an election (default $GLASSBALLOT_ORGANIZER_KEY; unset = anyone)")
     ap.add_argument("--db", default="out/glassballot.db", help='SQLite file for bulletin boards ("" = memory only)')
     ap.add_argument("--workers", type=int, default=os.cpu_count() or 1,
                     help="processes that verify ballots in parallel (0 = in the request thread)")
@@ -62,12 +66,14 @@ def main():
     port = args.port or (8443 if cert else 8000)
 
     server = make_server(args.host, port, args.db or None, workers=args.workers, rate=args.rate,
-                         burst=args.burst, certfile=cert, keyfile=key, proxy=args.proxy)
+                         burst=args.burst, certfile=cert, keyfile=key, proxy=args.proxy,
+                         proxy_hops=args.proxy_hops, organizer_key=args.organizer_key)
     print(f"Glass Ballot on {scheme}://{args.host}:{port}  (Ctrl+C to stop)")
     print(f"  bulletin boards : {args.db or 'in memory only'}")
     print(f"  ballot checkers : {args.workers or 'request thread'} process(es)")
     if args.proxy:
-        print("  reverse proxy   : client IP and HTTPS taken from X-Forwarded-* headers")
+        print(f"  reverse proxy   : client IP = X-Forwarded-For entry {args.proxy_hops} from the right; HTTPS from X-Forwarded-Proto")
+    print(f"  new elections   : {'need the organizer key' if args.organizer_key else 'anyone may start one (set --organizer-key on a public server)'}")
     print(f"  rate limit      : {f'{args.rate:g}/s per IP, burst {args.burst}' if args.rate > 0 else 'off'}")
     if cert:
         print(f"  certificate     : {cert} (self-signed: the browser will warn once)")

@@ -136,10 +136,42 @@ class TestWebApi(unittest.TestCase):
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         api = Api(f"http://127.0.0.1:{srv.server_address[1]}")
         try:
-            post = lambda ip: api.call("/api/receipt", {"receipt": "x"}, {"X-Forwarded-For": f"{ip}, 10.0.0.1"})[0]
-            self.assertEqual([post("1.1.1.1"), post("1.1.1.1"), post("2.2.2.2")], [409, 429, 409])
+            # The client may send its own X-Forwarded-For; the proxy appends the address it really saw.
+            post = lambda spoof, ip: api.call("/api/receipt", {"receipt": "x"},
+                                              {"X-Forwarded-For": f"{spoof}, {ip}"})[0]
+            self.assertEqual([post("6.6.6.1", "1.1.1.1"), post("6.6.6.2", "1.1.1.1"), post("6.6.6.3", "2.2.2.2")],
+                             [409, 429, 409])   # rotating the spoofed entry does not reset the limit
             headers = api.call("/api/state", headers={"X-Forwarded-Proto": "https"})[2]
             self.assertIn("Strict-Transport-Security", headers)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_proxy_hops(self):
+        srv = web.make_server("127.0.0.1", 0, rate=0.01, burst=1, proxy=True, proxy_hops=2)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        api = Api(f"http://127.0.0.1:{srv.server_address[1]}")
+        try:
+            post = lambda xff: api.call("/api/receipt", {"receipt": "x"}, {"X-Forwarded-For": xff})[0]
+            self.assertEqual([post("6.6.6.1, 1.1.1.1, 10.0.0.1"), post("6.6.6.2, 1.1.1.1, 10.0.0.2"),
+                              post("2.2.2.2, 10.0.0.1")], [409, 429, 409])
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_organizer_key_guards_new_elections(self):
+        srv = web.make_server("127.0.0.1", 0, rate=0, organizer_key="s3cret")
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        api = Api(f"http://127.0.0.1:{srv.server_address[1]}")
+        body = {"title": "Guarded", "candidates": ["A", "B"], "voters": 1, "paillier_bits": 1024, "trustees": 1}
+        try:
+            self.assertTrue(api.call("/api/state")[1]["organizer_key_required"])
+            self.assertEqual(api.call("/api/election", body)[0], 403)
+            self.assertEqual(api.call("/api/election", body, {"X-Organizer-Key": "wrong"})[0], 403)
+            self.assertEqual(api.call("/api/state")[1]["phase"], "none")
+            status, made, _ = api.call("/api/election", body, {"X-Organizer-Key": "s3cret"})
+            self.assertEqual(status, 200, made)
+            self.assertEqual(api.call("/api/state")[1]["phase"], "open")
         finally:
             srv.shutdown()
             srv.server_close()

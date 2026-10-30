@@ -10,3 +10,5 @@ services:
     envVars:
       - key: PORT          # the Dockerfile serves on 8080; tell Render to route there
         value: "8080"
+      - key: GLASSBALLOT_ORGANIZER_KEY   # needed to start an election; read it under Environment in the dashboard
+        generateValue: true

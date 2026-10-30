@@ -39,7 +39,11 @@ Scroll to the **trust grid** under the diagram: it is a one-line summary of what
 
 ## 2. Key ceremony (tab B → setup form)
 
-Fill in: title, 3 candidates, **5 voters**, **3 trustees**, **2048-bit**. Click **Run the key ceremony**.
+Fill in: title, 3 candidates, **5 voters**, **3 trustees**, **2048-bit**. On the hosted site, also enter the **organizer key**
+(Render dashboard → the service → Environment → `GLASSBALLOT_ORGANIZER_KEY`). Click **Run the key ceremony**.
+
+If asked "can't anyone just start an election?": not on the hosted server. `POST /api/election` needs the organizer key,
+the server keeps only its SHA-256 hash and compares it in constant time. Locally it is off, so the demo needs no setup.
 
 What happens (`glassballot/web/server.py` `HostedElection.__init__` → `election/tally.py` `key_ceremony`):
 
