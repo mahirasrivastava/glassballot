@@ -4,130 +4,352 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Glass Ballot</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='4' y='12' width='24' height='16' rx='3' fill='%230e7c74'/%3E%3Crect x='9' y='4' width='14' height='12' rx='2' fill='%2399e6dc'/%3E%3Crect x='8' y='13' width='16' height='2' rx='1' fill='%23053b37'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
+  <script src="theme.js"></script>
 </head>
 <body>
   <header class="top">
     <div class="wrap top-inner">
-      <div class="brand">
-        <span class="logo" aria-hidden="true">◇</span>
-        <div>
-          <h1>Glass Ballot</h1>
-          <p class="sub">Encrypted voting with a public audit trail</p>
-        </div>
+      <a class="brand" href="/" id="brand">
+        <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
+          <rect x="4" y="12" width="24" height="16" rx="3" class="logo-box"/>
+          <rect x="9" y="3" width="14" height="13" rx="2" class="logo-paper"/>
+          <path d="M12.5 9.5l2.4 2.4 4.6-4.8" class="logo-check"/>
+          <rect x="8" y="13" width="16" height="2" rx="1" class="logo-slot"/>
+        </svg>
+        <span>
+          <span class="brand-name">Glass Ballot</span>
+          <span class="brand-sub">Encrypted voting with a public audit trail</span>
+        </span>
+      </a>
+      <ol class="stepper" id="stepper" aria-label="Election progress"></ol>
+      <div class="top-actions">
+        <a class="btn ghost small" href="learn.html">How it works</a>
+        <button class="icon-btn" id="theme-btn" type="button" title="Toggle light / dark" aria-label="Toggle colour theme">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>
+        </button>
+        <button class="btn ghost small" id="new-btn" type="button" hidden>New election</button>
       </div>
-      <div class="status" id="status"></div>
     </div>
   </header>
 
   <main class="wrap">
-    <div class="toast" id="toast" role="status" hidden></div>
+    <div class="toasts" id="toasts" aria-live="polite"></div>
 
-    <!-- Setup -->
-    <section class="card" id="setup">
-      <h2><span class="step">1</span> Key ceremony</h2>
-      <p class="hint">Generates the trustee's Paillier key and the authority's RSA key, then issues a signed
-        credential to each voter. Starting a new election discards the current one.</p>
-      <form id="setup-form" class="grid-form">
-        <label>Title
-          <input name="title" value="Student council election" maxlength="80">
-        </label>
-        <label>Candidates <small>one per line</small>
-          <textarea name="candidates" rows="3">Alice
-Bob
-Carol</textarea>
-        </label>
-        <div class="row">
-          <label>Voters
-            <input name="voters" type="number" min="1" max="50" value="5">
-          </label>
-          <label>Paillier key
-            <select name="paillier_bits">
-              <option value="2048">2048-bit</option>
-              <option value="1024">1024-bit (faster, demo only)</option>
-            </select>
-          </label>
-        </div>
-        <button class="btn primary" type="submit">Create election</button>
-      </form>
-    </section>
-
-    <div id="election" hidden>
-      <div class="cols">
-        <!-- Booth -->
-        <section class="card" id="booth">
-          <h2><span class="step">2</span> Voting booth</h2>
-          <form id="vote-form">
-            <label>Voting as
-              <select name="voter" id="voter-select"></select>
-            </label>
-            <fieldset class="choices" id="choices"></fieldset>
-            <button class="btn primary" type="submit" id="cast-btn">Encrypt &amp; cast ballot</button>
-            <p class="hint">Your choice is encrypted as one ciphertext per candidate, with zero-knowledge proofs
-              that each holds 0 or 1 and that they add up to 1. In this demo the server encrypts on the voter's behalf;
-              in-browser encryption is the next phase.</p>
-          </form>
-          <div class="receipt" id="receipt" hidden>
-            <div class="receipt-label">Ballot accepted. Keep your receipt:</div>
-            <code id="receipt-value"></code>
-            <button class="btn small" type="button" id="copy-receipt">Copy</button>
-          </div>
-        </section>
-
-        <!-- Roll -->
-        <section class="card">
-          <h2>Voter roll</h2>
-          <table class="roll">
-            <thead><tr><th>Voter</th><th>Credential</th><th>Status</th></tr></thead>
-            <tbody id="roll"></tbody>
-          </table>
-        </section>
+    <!-- ============================================================ setup -->
+    <section id="setup" class="setup" hidden>
+      <div class="intro">
+        <p class="eyebrow">Helios-style verifiable voting</p>
+        <h1>Every vote secret.<br>Every count provable.</h1>
+        <p class="lede">Your browser encrypts the ballot with Paillier and proves it is valid. The server adds ballots up
+          <em>while still encrypted</em>, and only all the trustees together can open the totals. Anyone can check every step on the public bulletin board.</p>
+        <ul class="pillars">
+          <li><span class="pillar-icon">🔒</span><div><strong>Encrypted on your device</strong><span>The server never sees a vote or a voter's private key.</span></div></li>
+          <li><span class="pillar-icon">∑</span><div><strong>Homomorphic tally</strong><span>Multiplying ciphertexts adds the votes. No single ballot is ever decrypted.</span></div></li>
+          <li><span class="pillar-icon">⚿</span><div><strong>Split decryption key</strong><span>Every trustee holds one share. Nobody can decrypt alone, not even the server.</span></div></li>
+          <li><span class="pillar-icon">✓</span><div><strong>Publicly verifiable</strong><span>Signatures, zero-knowledge proofs and a hash chain anyone can re-check.</span></div></li>
+        </ul>
       </div>
 
-      <!-- Tally -->
-      <section class="card" id="tally">
-        <h2><span class="step">3</span> Close, tally and audit</h2>
-        <div id="tally-open">
-          <p class="hint">Closing multiplies all ballots together (the product decrypts to the sum), and the trustee
-            decrypts each candidate's total once, with a proof that the decryption is correct.</p>
-          <button class="btn danger" id="close-btn">Close election &amp; tally</button>
+      <form id="setup-form" class="card setup-card" autocomplete="off">
+        <div class="card-title">
+          <h2>Key ceremony</h2>
+          <button class="btn ghost small" type="button" id="cancel-setup" hidden>Cancel</button>
         </div>
-        <div id="tally-done" hidden>
-          <div id="results" class="results"></div>
-          <div class="verify-bar">
-            <button class="btn primary" id="verify-btn">Run public verifier</button>
-            <span class="hint">Re-checks everything using only the bulletin board. No keys, no trust in the server.</span>
+        <p class="hint">You act as the <strong>election authority</strong>. This generates the election key, splits it among the trustees,
+          and creates one-time registration codes for the voters.</p>
+
+        <label class="field">Election title
+          <input name="title" value="Student council election" maxlength="80" required>
+        </label>
+
+        <div class="field">
+          <span class="field-label">Candidates</span>
+          <ul class="cand-list" id="cand-list"></ul>
+          <button class="btn ghost small add-cand" type="button" id="add-cand">+ Add candidate</button>
+        </div>
+
+        <div class="row2">
+          <div class="field">
+            <span class="field-label">Voters <output id="voters-out" class="field-value">5</output></span>
+            <input type="range" name="voters" id="voters-range" min="1" max="50" value="5">
           </div>
-          <ul class="checks" id="checks"></ul>
+          <div class="field">
+            <span class="field-label">Trustees <output id="trustees-out" class="field-value">3</output></span>
+            <input type="range" name="trustees" id="trustees-range" min="1" max="5" value="3">
+          </div>
         </div>
-        <form id="receipt-form" class="receipt-check">
-          <label>Check a receipt is on the board
-            <div class="inline">
-              <input name="receipt" placeholder="Paste a ballot receipt" autocomplete="off">
-              <button class="btn" type="submit">Find</button>
+
+        <div class="field">
+          <span class="field-label">Paillier key size</span>
+          <div class="segmented" role="radiogroup">
+            <label><input type="radio" name="paillier_bits" value="2048" checked><span>2048-bit<small>recommended</small></span></label>
+            <label><input type="radio" name="paillier_bits" value="1024"><span>1024-bit<small>fast, demo only</small></span></label>
+          </div>
+        </div>
+
+        <button class="btn primary block" type="submit">Run the key ceremony</button>
+      </form>
+
+      <div class="card archive" id="archive" hidden>
+        <div class="card-title"><h2>Past elections</h2><span class="muted small" id="archive-where"></span></div>
+        <p class="hint">Every bulletin board is stored in SQLite, so it survives a restart. Re-verify any tallied election from the stored board alone.</p>
+        <ol class="archive-list" id="archive-list"></ol>
+      </div>
+    </section>
+
+    <!-- ========================================================= election -->
+    <div id="election" hidden>
+      <section class="overview">
+        <div class="ov-title">
+          <p class="eyebrow" id="ov-id"></p>
+          <h1 id="ov-title"></h1>
+        </div>
+        <div class="stats">
+          <div class="stat turnout">
+            <svg viewBox="0 0 44 44" class="ring" aria-hidden="true">
+              <circle cx="22" cy="22" r="18" class="ring-bg"/>
+              <circle cx="22" cy="22" r="18" class="ring-fg" id="ring-fg"/>
+            </svg>
+            <div><span class="stat-num" id="st-turnout">0%</span><span class="stat-label">turnout</span></div>
+          </div>
+          <div class="stat"><span class="stat-num" id="st-registered">0</span><span class="stat-label">registered</span></div>
+          <div class="stat"><span class="stat-num" id="st-board">0</span><span class="stat-label">board entries</span><span id="st-head"></span></div>
+          <div class="stat"><span class="stat-num" id="st-crypto">-</span><span class="stat-label" id="st-crypto-label">Paillier</span></div>
+        </div>
+      </section>
+
+      <nav class="tabs" role="tablist">
+        <button role="tab" data-tab="authority"><span class="tab-ico">⚑</span>Authority</button>
+        <button role="tab" data-tab="booth"><span class="tab-ico">✎</span>Voter booth</button>
+        <button role="tab" data-tab="trustees"><span class="tab-ico">⚿</span>Trustees</button>
+        <button role="tab" data-tab="tally"><span class="tab-ico">∑</span>Results &amp; audit</button>
+        <button role="tab" data-tab="board"><span class="tab-ico">⛓</span>Bulletin board <span class="count" id="tab-board-count"></span></button>
+      </nav>
+
+      <!-- authority -->
+      <section class="panel" data-panel="authority">
+        <div class="notice" id="not-admin" hidden>
+          <span>This browser is not the election authority for this election: the admin token stays on the device that ran the key ceremony.
+            Start your own election to act as the authority here.</span>
+          <button class="btn primary small" type="button" id="not-admin-new">Start a new election</button>
+        </div>
+        <div class="authority" id="authority">
+          <div class="card">
+            <div class="card-title">
+              <h2>Registration codes</h2>
+              <span class="muted small" id="codes-sum"></span>
             </div>
+            <p class="hint">In a real election each code goes to one eligible voter (by post or e-mail). A code can register exactly one
+              device key, and the server keeps only its SHA-256 hash for checking. For the demo, <strong>Use on this device</strong> hands the code to the booth.</p>
+            <div class="codes-actions">
+              <button class="btn small" type="button" id="register-all">Register every remaining voter on this device</button>
+            </div>
+            <ol class="codes" id="codes"></ol>
+          </div>
+          <div class="side-stack">
+            <div class="card">
+              <div class="card-title"><h2>Close the polls</h2></div>
+              <p class="hint">Stops voting and posts a close entry that commits to the exact set of ballots. After this, the trustees can decrypt the totals.</p>
+              <div class="flow mini" aria-hidden="true">
+                <div class="flow-step"><span class="flow-icon">▤</span><strong>Ballots</strong><span>cᵢ per candidate</span></div>
+                <span class="flow-arrow">→</span>
+                <div class="flow-step"><span class="flow-icon">×</span><strong>Multiply</strong><span>Π cᵢ = Enc(Σ)</span></div>
+              </div>
+              <div class="close-row">
+                <button class="btn danger" type="button" id="close-btn">Close polls</button>
+                <span class="muted small" id="close-note"></span>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-title"><h2>Trustee key shares</h2></div>
+              <p class="hint">The decryption key was split into <strong id="share-count">k</strong> shares, and the server deleted them after handing them over.
+                Give each file to a different trustee. For the demo, they are also kept in this browser's Trustees tab.</p>
+              <ol class="share-files" id="share-files"></ol>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- booth -->
+      <section class="panel" data-panel="booth">
+        <div class="booth">
+          <div class="side-stack">
+            <div class="card">
+              <div class="card-title"><h2>Voter devices</h2><span class="muted small" id="devices-sum"></span></div>
+              <p class="hint">Each device holds a 2048-bit RSA key made in this browser. Only the public key and its credential leave the device.</p>
+              <div class="voters" id="devices" role="radiogroup" aria-label="Voting device"></div>
+            </div>
+            <form class="card" id="register-form" autocomplete="off">
+              <div class="card-title"><h2>Register a device</h2></div>
+              <p class="hint">Enter a registration code. Your browser generates a key pair, sends the <strong>public</strong> key, and the authority signs a credential for it.</p>
+              <div class="inline">
+                <input name="code" placeholder="XXXX-XXXX-XXXX" spellcheck="false" aria-label="Registration code" class="mono">
+                <button class="btn" type="submit">Register</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="ballot-col">
+            <form class="card ballot" id="vote-form">
+              <div class="ballot-head">
+                <span class="eyebrow">Official ballot</span>
+                <h2 id="ballot-title"></h2>
+                <p class="ballot-voter" id="ballot-voter"></p>
+              </div>
+              <fieldset class="choices" id="choices"><legend class="sr">Choose one candidate</legend></fieldset>
+              <p class="warn" id="booth-warn" hidden></p>
+              <button class="btn primary block lg" type="submit" id="encrypt-btn">Encrypt my ballot</button>
+              <p class="hint center">Step 1 of 2: your browser encrypts and proves. Nothing is sent yet.</p>
+            </form>
+
+            <div class="card sealed" id="sealed" hidden>
+              <div class="card-title">
+                <h2>Ballot sealed on this device</h2>
+                <span class="badge neutral" id="sealed-time"></span>
+              </div>
+              <p class="hint">This is exactly what would be published. Its fingerprint is fixed <em>before</em> you decide. You can cast it, or audit it
+                to check your device encrypted what you chose (an audited ballot is spoiled and never counted).</p>
+              <div class="fingerprint-line"><span class="muted small">ballot fingerprint</span><span id="sealed-fp"></span><code id="sealed-hash"></code></div>
+              <ol class="ciphers" id="sealed-ciphers"></ol>
+              <div class="sealed-actions">
+                <button class="btn primary lg" type="button" id="cast-btn">Sign &amp; cast</button>
+                <button class="btn ghost lg" type="button" id="audit-btn">Audit instead (spoil)</button>
+                <button class="btn ghost small" type="button" id="discard-btn">Discard</button>
+              </div>
+            </div>
+
+            <div class="card audit-card" id="audit-card" hidden>
+              <div class="card-title"><h2>Ballot audit (Benaloh challenge)</h2><span class="badge warnb">spoiled · not counted</span></div>
+              <p class="hint">The device revealed the secret randomness rᵢ behind each ciphertext. Re-encrypting the claimed choice with those rᵢ must give
+                exactly the same ciphertexts. The check runs twice, by this browser and by the server's independent Python code.</p>
+              <ol class="audit-rows" id="audit-rows"></ol>
+              <div class="audit-verdict" id="audit-verdict"></div>
+              <button class="btn small" type="button" id="audit-again">Encrypt a fresh ballot</button>
+            </div>
+
+            <div class="card reveal" id="reveal" hidden>
+              <div class="card-title">
+                <h2>Ballot cast</h2>
+                <button class="btn ghost small" type="button" id="reveal-board">View on board →</button>
+              </div>
+              <div class="receipt-ticket">
+                <div class="ticket-top">
+                  <span class="eyebrow">Ballot receipt</span>
+                  <span id="ticket-fp"></span>
+                </div>
+                <code id="receipt-value"></code>
+                <ul class="ticket-checks" id="ticket-checks"></ul>
+                <div class="ticket-actions">
+                  <button class="btn small" type="button" id="copy-receipt">Copy receipt</button>
+                  <span class="muted small" id="ticket-time"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- trustees -->
+      <section class="panel" data-panel="trustees">
+        <div class="card">
+          <div class="card-title"><h2>Trustees</h2><span class="muted small" id="trustee-sum"></span></div>
+          <p class="hint">After the polls close, each trustee's own device recomputes the encrypted totals from the public board and raises them to its secret share:
+            <code>Pⱼ = (T mod n)^sⱼ mod n</code>. The product of <strong>all</strong> the partials is the randomness R of the total, which opens it: gᵐ·Rⁿ = T.
+            Any trustee who is missing, or who submits a wrong partial, means nothing opens.</p>
+          <ol class="trustees" id="trustees"></ol>
+          <label class="load-share">
+            <input type="file" id="share-file" accept=".json,application/json" class="sr">
+            <span class="btn ghost small">Load a trustee share file…</span>
           </label>
-          <p id="receipt-result" class="hint"></p>
+        </div>
+      </section>
+
+      <!-- tally -->
+      <section class="panel" data-panel="tally">
+        <div class="card" id="tally-waiting">
+          <div class="card-title"><h2>No results yet</h2></div>
+          <p class="hint" id="tally-waiting-text"></p>
+          <button class="btn primary small" type="button" id="tally-next"></button>
+        </div>
+
+        <div id="tally-done" hidden>
+          <div class="audit">
+            <div class="card">
+              <div class="card-title"><h2>Results</h2><span class="muted small" id="results-sum"></span></div>
+              <ol class="results" id="results"></ol>
+            </div>
+            <div class="card verifier">
+              <div class="card-title"><h2>Public verifier</h2></div>
+              <p class="hint">Re-checks every signature, proof, hash and decryption using <strong>only the bulletin board</strong>. No keys and no trust in this server.
+                It is the same code as <code>scripts/verify_board.py</code>.</p>
+              <button class="btn primary block" type="button" id="verify-btn">Run the verifier</button>
+              <ol class="checks" id="checks"></ol>
+              <div class="seal" id="seal" hidden></div>
+            </div>
+          </div>
+        </div>
+
+        <form class="card lookup" id="receipt-form">
+          <div class="card-title"><h2>Check your receipt</h2></div>
+          <p class="hint">Paste the receipt you got when voting to confirm your ballot is on the board and counted.</p>
+          <div class="inline">
+            <input name="receipt" placeholder="64-character receipt" autocomplete="off" spellcheck="false" aria-label="Receipt" class="mono">
+            <button class="btn" type="submit">Find ballot</button>
+          </div>
+          <p id="receipt-result" class="lookup-result"></p>
         </form>
       </section>
 
-      <!-- Board -->
-      <section class="card">
-        <div class="card-head">
-          <h2>Bulletin board</h2>
-          <a class="btn small" href="/api/board.jsonl" download>Download board.jsonl</a>
+      <!-- board -->
+      <section class="panel" data-panel="board">
+        <div class="card">
+          <div class="card-title">
+            <h2>Bulletin board</h2>
+            <a class="btn ghost small" href="/api/board.jsonl" download>Download board.jsonl</a>
+          </div>
+          <p class="hint">Append-only and hash-chained. Each block records the hash of the block before it, so the colour bands line up.
+            Editing, inserting or deleting anything breaks every link after it. Head hash to compare with others: <code id="board-head"></code></p>
+          <div class="filters" id="filters" role="tablist">
+            <button data-filter="all">All</button>
+            <button data-filter="credential">Credentials</button>
+            <button data-filter="ballot">Ballots</button>
+            <button data-filter="tally">Election &amp; tally</button>
+          </div>
+          <ol class="chain" id="chain"></ol>
+          <p class="storage-note" id="storage-note"></p>
         </div>
-        <p class="hint">Append-only and hash-chained: each entry commits to the one before it, so editing, inserting
-          or deleting anything breaks the chain. Click an entry to see its contents.</p>
-        <ol class="board" id="board"></ol>
       </section>
     </div>
   </main>
 
-  <div class="busy" id="busy" hidden>
-    <div class="busy-box"><div class="spinner"></div><span id="busy-text">Working…</span></div>
+  <footer class="wrap foot">
+    Paillier · threshold decryption · RSA credentials · Fiat–Shamir zero-knowledge proofs · <a href="learn.html">How it works</a>
+  </footer>
+
+  <div class="modal" id="handover" hidden>
+    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="handover-title">
+      <h2 id="handover-title">Key ceremony complete</h2>
+      <p class="hint" id="handover-text"></p>
+      <ul class="handover-list" id="handover-list"></ul>
+      <p class="warn">These secrets were shown once. The server kept only hashes of the tokens and none of the key shares.</p>
+      <button class="btn primary block" type="button" id="handover-ok">Continue to the authority console</button>
+    </div>
   </div>
 
+  <div class="busy" id="busy" hidden>
+    <div class="busy-box" role="alertdialog" aria-live="assertive">
+      <div class="spinner" aria-hidden="true"></div>
+      <div>
+        <strong id="busy-title">Working…</strong>
+        <ul class="busy-lines" id="busy-lines"></ul>
+        <span class="busy-time" id="busy-time">0.0 s</span>
+      </div>
+    </div>
+  </div>
+
+  <script src="gbcrypto.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

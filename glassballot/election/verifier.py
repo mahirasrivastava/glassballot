@@ -10,19 +10,19 @@ the service. Re-derives and re-checks every claim the service made:
      valid voter signature, valid 0-or-1 and sum-equals-1 proofs
   5. close entry matches the number of ballots
   6. encrypted totals recomputed from the ballots equal the posted ones
-  7. every decryption proof verifies; totals add up to the ballot count
+  7. every total is opened: the k trustees' partials multiply to R and
+     g^m * R^n = T (mod n^2); totals add up to the ballot count
 """
 
 from dataclasses import dataclass, field
 
 from ..crypto.encoding import hex_to_int
-from ..crypto.proofs import verify_decryption
 from ..crypto.rsa import RSAPublicKey
 from .authority import verify_credential
 from .ballot import InvalidBallot, ballot_signing_bytes, verify_ballot_body
 from .bulletin_board import verify_chain
 from .params import ElectionParams
-from .tally import aggregate, decryption_context
+from .tally import aggregate, check_opening
 
 
 @dataclass
@@ -53,7 +53,9 @@ class VerificationReport:
         return "\n".join(lines)
 
 
-def verify_election(entries) -> VerificationReport:
+def verify_election(entries, executor=None) -> VerificationReport:
+    """executor: optional concurrent.futures executor; the per-ballot signature and proof
+    checks (the expensive part, independent of each other) are spread across it."""
     rep = VerificationReport()
 
     ok, reason = verify_chain(entries)
@@ -80,8 +82,8 @@ def verify_election(entries) -> VerificationReport:
         return rep
     pk, eid = params.paillier_public_key, params.election_id
 
-    # -- credentials and ballots, in board order
-    roll, voted, accepted, bad_creds, bad_ballots = {}, set(), [], [], []
+    # -- credentials and ballots, in board order (cheap, sequential checks)
+    roll, voted, pending, bad_creds, bad_ballots = {}, set(), [], [], []
     for e in entries[1:-2]:
         p = e["payload"]
         if e["kind"] == "credential":
@@ -90,14 +92,26 @@ def verify_election(entries) -> VerificationReport:
             else:
                 roll[p["credential_id"]] = p
         elif e["kind"] == "ballot":
-            problem = _check_ballot(p, params, roll, voted)
+            problem = _ballot_precheck(p, roll, voted)
             if problem:
                 bad_ballots.append(f"#{e['seq']} ({problem})")
             else:
                 voted.add(p["body"]["credential_id"])
-                accepted.append(p["body"])
+                pending.append(e)
         else:
             bad_ballots.append(f"#{e['seq']} (unexpected {e['kind']} entry)")
+
+    # -- signatures and proofs (expensive, independent: parallel when an executor is given)
+    jobs = [(entries[0]["payload"], roll[e["payload"]["body"]["credential_id"]]["voter_public_key"], e["payload"])
+            for e in pending]
+    problems = list(executor.map(_ballot_crypto, jobs, chunksize=max(1, len(jobs) // 64)) if executor and jobs
+                    else map(_ballot_crypto, jobs))
+    accepted = []
+    for e, problem in zip(pending, problems):
+        if problem:
+            bad_ballots.append(f"#{e['seq']} ({problem})")
+        else:
+            accepted.append(e["payload"]["body"])
 
     rep.add("voter roll", not bad_creds,
             f"{len(roll)} credentials signed by the authority" if not bad_creds
@@ -116,22 +130,30 @@ def verify_election(entries) -> VerificationReport:
     tally_ok, decrypt_ok, details = len(posted) == params.num_candidates, True, []
     for i, r in enumerate(posted if tally_ok else []):
         try:
-            c, m = hex_to_int(r["encrypted_total"]), r["total"]
+            c, m, rand = hex_to_int(r["encrypted_total"]), r["total"], hex_to_int(r["randomness"])
+            partials = [hex_to_int(x) for x in r["partials"]]
         except (KeyError, TypeError, ValueError):
             tally_ok = False
+            details.append(f"candidate {i}: result entry malformed")
             continue
         if r.get("candidate") != i or c != totals[i]:
             tally_ok = False
             details.append(f"candidate {i}: posted encrypted total != product of ballots")
-        if not verify_decryption(pk, c, m, r.get("proof", {}), decryption_context(eid, i)):
+        product = 1
+        for x in partials:
+            product = product * x % pk.n
+        if len(partials) != params.trustees or product != rand:
             decrypt_ok = False
-            details.append(f"candidate {i}: decryption proof invalid for total {m}")
+            details.append(f"candidate {i}: randomness is not the product of {params.trustees} trustee partials")
+        elif not check_opening(pk, c, m, rand):
+            decrypt_ok = False
+            details.append(f"candidate {i}: g^m * R^n != total for announced m = {m}")
     rep.add("homomorphic tally", tally_ok,
             "encrypted totals match the product of all accepted ballots" if tally_ok
-            else "; ".join(d for d in details if "product" in d) or "results malformed")
+            else "; ".join(d for d in details if "product of ballots" in d) or "results malformed")
     rep.add("decryption proofs", decrypt_ok,
-            "every announced total is the true decryption" if decrypt_ok
-            else "; ".join(d for d in details if "decryption" in d))
+            f"every total opened by all {params.trustees} trustees' partials: g^m * R^n = T" if decrypt_ok
+            else "; ".join(d for d in details if "product of ballots" not in d) or "results malformed")
     if tally_ok and decrypt_ok:
         s = sum(r["total"] for r in posted)
         rep.add("totals consistent", s == len(accepted), f"sum of totals {s}, ballots {len(accepted)}")
@@ -139,18 +161,27 @@ def verify_election(entries) -> VerificationReport:
     return rep
 
 
-def _check_ballot(signed: dict, params: ElectionParams, roll: dict, voted: set):
-    """Return None if valid, else a short reason."""
+def _ballot_precheck(signed: dict, roll: dict, voted: set):
+    """Structure, registration and one-ballot-per-credential. None if fine, else a short reason."""
     try:
-        body, sig = signed["body"], hex_to_int(signed["signature"])
-        cred_id = body["credential_id"]
+        cred_id = signed["body"]["credential_id"]
+        hex_to_int(signed["signature"])
+        hash(cred_id)
     except (KeyError, TypeError, ValueError):
         return "malformed"
     if cred_id not in roll:
         return "credential not registered"
     if cred_id in voted:
         return "second ballot for credential"
-    if not RSAPublicKey.from_dict(roll[cred_id]["voter_public_key"]).verify(ballot_signing_bytes(body), sig):
+    return None
+
+
+def _ballot_crypto(job):
+    """Voter signature and every ballot proof. Pure, so it can run in another process."""
+    params_dict, voter_key, signed = job
+    params = ElectionParams.from_dict(params_dict)
+    body = signed["body"]
+    if not RSAPublicKey.from_dict(voter_key).verify(ballot_signing_bytes(body), hex_to_int(signed["signature"])):
         return "bad voter signature"
     try:
         verify_ballot_body(params.paillier_public_key, params.election_id, params.num_candidates, body)

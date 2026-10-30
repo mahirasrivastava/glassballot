@@ -12,10 +12,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from glassballot.crypto.encoding import int_to_hex                   # noqa: E402
+from glassballot.crypto.encoding import hex_to_int, int_to_hex       # noqa: E402
 from glassballot.election.ballot import ballot_signing_bytes        # noqa: E402
 from glassballot.election.service import Rejected                   # noqa: E402
-from glassballot.election.tally import aggregate                    # noqa: E402
+from glassballot.election.tally import aggregate, build_results, combine  # noqa: E402
 from glassballot.election.verifier import verify_election           # noqa: E402
 from glassballot.simulation import Election                         # noqa: E402
 
@@ -23,7 +23,7 @@ BITS = 1024
 
 
 def new_election(n=3):
-    return Election(num_voters=n, paillier_bits=BITS, authority_bits=BITS, voter_bits=1024)
+    return Election(num_voters=n, paillier_bits=BITS, authority_bits=BITS, voter_bits=1024, trustees=3)
 
 
 def expect_rejected(label, fn):
@@ -84,6 +84,27 @@ def main():
     forged["signature"] = int_to_hex(int(forged["signature"], 16) ^ 1)
     results.append(expect_rejected("forged voter signature", lambda: el.service.cast(forged)))
 
+    el = new_election()
+    el.cast_all([0, 1, 2])
+    el.service.close()
+    partials = el.partials()
+    partials[1][0] = int_to_hex(hex_to_int(partials[1][0]) * 3 % el.params.paillier_public_key.n)
+    results.append(expect_rejected("trustee submits a bad partial decryption",
+                                   lambda: el.service.publish_results(partials)))
+
+    print("\nAttacks on ballot secrecy:")
+    el = new_election()
+    el.cast_all([2])
+    c = hex_to_int(el.board.entries("ballot")[0]["payload"]["body"]["ciphertexts"][2])
+    pk = el.params.paillier_public_key
+    try:
+        combine(pk, c, el.trustees[0].partial_decrypt([c]) + el.trustees[1].partial_decrypt([c]))
+        print("  !! 2 of 3 trustees collude to open one ballot: succeeded")
+        results.append(False)
+    except ValueError:
+        print("  ok 2 of 3 trustees collude to open one ballot: their partials open nothing")
+        results.append(True)
+
     print("\nAttacks by a dishonest server or trustee, caught by the public verifier:")
     el = new_election()
     el.cast_all([0, 1, 2])
@@ -96,7 +117,7 @@ def main():
     el.cast_all([0, 1, 2])                                    # voters 1-3 vote honestly
     el.board.append("ballot", stuffed_ballot(el, 3))          # server bypasses its own checks
     el.service.close()
-    el.service.publish_results(el.trustee)
+    el.service.publish_results(el.partials())
     results.append(expect_verifier_fail("server injects a stuffed ballot", el.board.entries(), "ballots"))
 
     el = new_election()
@@ -104,7 +125,8 @@ def main():
     el.service.close()
     p = el.params
     bodies = [e["payload"]["body"] for e in el.board.entries("ballot")][1:]   # drop one ballot
-    res = el.trustee.decrypt_tally(p.election_id, p.candidates, aggregate(p.paillier_public_key, bodies, 3))
+    totals = aggregate(p.paillier_public_key, bodies, 3)
+    res = build_results(p.paillier_public_key, p.candidates, totals, [t.partial_decrypt(totals) for t in el.trustees])
     el.board.append("result", {"election_id": p.election_id, "results": res})
     results.append(expect_verifier_fail("ballot dropped before tallying", el.board.entries(), "homomorphic tally"))
 
@@ -112,8 +134,7 @@ def main():
     el.cast_all([0, 1, 1])
     el.service.close()
     p = el.params
-    bodies = [e["payload"]["body"] for e in el.board.entries("ballot")]
-    res = el.trustee.decrypt_tally(p.election_id, p.candidates, aggregate(p.paillier_public_key, bodies, 3))
+    res = build_results(p.paillier_public_key, p.candidates, el.service.encrypted_totals(), el.partials())
     res[0]["total"], res[1]["total"] = res[0]["total"] + 1, res[1]["total"] - 1   # shift a vote
     el.board.append("result", {"election_id": p.election_id, "results": res})
     results.append(expect_verifier_fail("trustee announces a wrong total", el.board.entries(), "decryption proofs"))

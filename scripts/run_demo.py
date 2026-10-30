@@ -24,7 +24,8 @@ def main():
     ap.add_argument("--candidates", nargs="+", default=list(DEFAULT_CANDIDATES))
     ap.add_argument("--paillier-bits", type=int, default=2048)
     ap.add_argument("--authority-bits", type=int, default=2048)
-    ap.add_argument("--voter-bits", type=int, default=1024)
+    ap.add_argument("--voter-bits", type=int, default=2048)
+    ap.add_argument("--trustees", type=int, default=3, help="key shares; all are needed to decrypt")
     ap.add_argument("--board", default="out/board.jsonl", help="bulletin board file (overwritten)")
     ap.add_argument("--seed", type=int, help="seed for the simulated voters' choices only")
     args = ap.parse_args()
@@ -37,7 +38,7 @@ def main():
     print(f"[1] Key ceremony + registering {args.voters} voters "
           f"(Paillier {args.paillier_bits}-bit, RSA {args.authority_bits}/{args.voter_bits}-bit)...")
     el = Election(args.voters, tuple(args.candidates), args.paillier_bits,
-                  args.authority_bits, args.voter_bits, board_path)
+                  args.authority_bits, args.voter_bits, board_path, trustees=args.trustees)
     print(f"    election {el.params.election_id}: {el.params.title}, candidates {list(el.params.candidates)}")
 
     rng = random.Random(args.seed)
@@ -49,7 +50,7 @@ def main():
     print(f"    {len(receipts)} ballots accepted, {per_ballot * 1000:.0f} ms per ballot (encrypt+prove+check)")
     print(f"    sample receipt: {receipts[0][:32]}...")
 
-    print("[3] Closing election; trustee decrypts each homomorphic total once, with proofs...")
+    print(f"[3] Closing election; {args.trustees} trustees each decrypt their share of the totals...")
     for r in el.finish():
         print(f"    {r['name']:>10}: {r['total']}")
     expected = [choices.count(i) for i in range(len(args.candidates))]

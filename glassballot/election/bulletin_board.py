@@ -63,16 +63,23 @@ class BulletinBoard:
         payload = copy.deepcopy(payload)
         entry = {"seq": seq, "kind": kind, "payload": payload, "prev_hash": prev,
                  "entry_hash": compute_entry_hash(seq, kind, payload, prev)}
+        self._persist(entry)
         self._entries.append(entry)
+        return copy.deepcopy(entry)
+
+    def _persist(self, entry: dict):
+        """Write one new entry to storage; subclasses swap the backend (see sqlite_board.py)."""
         if self._path:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             with self._path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, sort_keys=True) + "\n")
-        return copy.deepcopy(entry)
 
-    def entries(self, kind: str = None) -> list:
-        """Read-only copies; callers cannot mutate the board through them."""
-        return [copy.deepcopy(e) for e in self._entries if kind is None or e["kind"] == kind]
+    def entries(self, kind: str = None, since: int = 0) -> list:
+        """Read-only copies (from position `since`); callers cannot mutate the board through them."""
+        return [copy.deepcopy(e) for e in self._entries[since:] if kind is None or e["kind"] == kind]
+
+    def entry(self, seq: int) -> dict:
+        return copy.deepcopy(self._entries[seq])
 
     def __len__(self):
         return len(self._entries)

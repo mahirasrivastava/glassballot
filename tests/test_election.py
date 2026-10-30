@@ -5,11 +5,11 @@ from pathlib import Path
 
 from tests.fixtures import small_election
 
-from glassballot.crypto.encoding import int_to_hex
+from glassballot.crypto.encoding import hex_to_int, int_to_hex
 from glassballot.election.ballot import ballot_signing_bytes
 from glassballot.election.bulletin_board import BulletinBoard, load_entries, verify_chain
 from glassballot.election.service import Rejected
-from glassballot.election.tally import aggregate
+from glassballot.election.tally import aggregate, build_results
 from glassballot.election.verifier import verify_election
 
 
@@ -60,6 +60,29 @@ class TestHonestElection(unittest.TestCase):
         el.cast_all([1])                       # only one of three voters casts
         el.finish()
         self.assertTrue(verify_election(el.board.entries()).ok)
+
+
+class TestParallelVerifier(unittest.TestCase):
+    def test_same_verdict_with_a_process_pool(self):
+        from concurrent.futures import ProcessPoolExecutor
+        el = small_election(4)
+        el.cast_all([0, 1, 2, 1])
+        el.finish()
+        good = el.board.entries()
+        bad = copy.deepcopy(good)
+        bad[6]["payload"]["signature"] = int_to_hex(hex_to_int(bad[6]["payload"]["signature"]) ^ 1)
+        from glassballot.election.bulletin_board import compute_entry_hash
+        prev = bad[5]["entry_hash"]
+        for e in bad[6:]:                        # re-chain so only the signature check can catch it
+            e["prev_hash"] = prev
+            e["entry_hash"] = prev = compute_entry_hash(e["seq"], e["kind"], e["payload"], prev)
+        with ProcessPoolExecutor(2) as pool:
+            for entries in (good, bad):
+                serial, parallel = verify_election(entries), verify_election(entries, pool)
+                self.assertEqual([(c.name, c.ok, c.detail) for c in serial.checks],
+                                 [(c.name, c.ok, c.detail) for c in parallel.checks])
+        self.assertTrue(verify_election(good).ok)
+        self.assertIn("bad voter signature", next(c.detail for c in verify_election(bad).checks if c.name == "ballots"))
 
 
 class TestServiceRejects(unittest.TestCase):
@@ -120,7 +143,9 @@ class TestVerifierCatchesDishonestServer(unittest.TestCase):
         el.service.close()
         p = el.params
         bodies = [e["payload"]["body"] for e in el.board.entries("ballot")][1:]
-        res = el.trustee.decrypt_tally(p.election_id, p.candidates, aggregate(p.paillier_public_key, bodies, 3))
+        totals = aggregate(p.paillier_public_key, bodies, 3)     # colluding trustees decrypt a subset
+        res = build_results(p.paillier_public_key, p.candidates, totals,
+                            [t.partial_decrypt(totals) for t in el.trustees])
         el.board.append("result", {"election_id": p.election_id, "results": res})
         self.assertIn("homomorphic tally", failed_checks(el.board.entries()))
 

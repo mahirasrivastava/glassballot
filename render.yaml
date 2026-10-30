@@ -1,0 +1,12 @@
+# Render blueprint: Dashboard -> New -> Blueprint -> pick this repo/branch.
+# Free plan: no persistent disk (boards reset on restart) and the service sleeps after ~15 min idle.
+services:
+  - type: web
+    name: glassballot
+    runtime: docker
+    plan: free
+    region: singapore
+    healthCheckPath: /api/state
+    envVars:
+      - key: PORT          # the Dockerfile serves on 8080; tell Render to route there
+        value: "8080"

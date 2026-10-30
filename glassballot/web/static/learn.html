@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>How Glass Ballot Works</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='4' y='12' width='24' height='16' rx='3' fill='%230e7c74'/%3E%3Crect x='9' y='4' width='14' height='12' rx='2' fill='%2399e6dc'/%3E%3Crect x='8' y='13' width='16' height='2' rx='1' fill='%23053b37'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="learn.css">
+  <script src="theme.js"></script>
+</head>
+<body class="learn">
+  <header class="top">
+    <div class="wrap top-inner">
+      <a class="brand" href="/">
+        <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
+          <rect x="4" y="12" width="24" height="16" rx="3" class="logo-box"/>
+          <rect x="9" y="3" width="14" height="13" rx="2" class="logo-paper"/>
+          <path d="M12.5 9.5l2.4 2.4 4.6-4.8" class="logo-check"/>
+          <rect x="8" y="13" width="16" height="2" rx="1" class="logo-slot"/>
+        </svg>
+        <span><span class="brand-name">Glass Ballot</span><span class="brand-sub">How it works</span></span>
+      </a>
+      <div class="top-actions">
+        <span class="live-pill" id="live-pill">sample values</span>
+        <button class="icon-btn" id="theme-btn" type="button" title="Toggle light / dark" aria-label="Toggle colour theme">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>
+        </button>
+        <a class="btn primary small" href="/">Open the app</a>
+      </div>
+    </div>
+  </header>
+
+  <div class="wrap learn-grid">
+    <nav class="toc" aria-label="Contents">
+      <ol>
+        <li><a href="#overview">1 · The big picture</a></li>
+        <li><a href="#keys">2 · Keys and who holds them</a></li>
+        <li><a href="#paillier">3 · Paillier encryption</a></li>
+        <li><a href="#ballot">4 · The ballot and its proofs</a></li>
+        <li><a href="#signatures">5 · Credentials and signatures</a></li>
+        <li><a href="#chain">6 · The hash-chained board</a></li>
+        <li><a href="#tally">7 · Tally and threshold decryption</a></li>
+        <li><a href="#verify">8 · Verification and audits</a></li>
+        <li><a href="#goals">9 · Security goals</a></li>
+        <li><a href="#code">10 · Where the code lives</a></li>
+      </ol>
+    </nav>
+
+    <main class="learn-main">
+      <section class="hero-l">
+        <p class="eyebrow">Architecture and cryptography</p>
+        <h1>How a vote stays secret<br>and the count stays honest</h1>
+        <p class="lede">Glass Ballot combines four building blocks: <strong>Paillier</strong> homomorphic encryption,
+          <strong>zero-knowledge proofs</strong>, <strong>RSA signatures</strong> and a <strong>hash-chained bulletin board</strong>.
+          The decryption key is split among several <strong>trustees</strong>. This page walks through each block with animations,
+          toy numbers you can play with, and real values from the election running on this server.</p>
+      </section>
+
+      <!-- 1 -->
+      <section class="lsec" id="overview">
+        <h2><span class="num">1</span>The big picture</h2>
+        <p>Six roles, one public bulletin board. Press <strong>Play</strong> to watch an election from start to finish, or pick a phase.
+          <span class="tag secret">secret</span> data never leaves its owner (except shares and codes handed out once).
+          <span class="tag public">public</span> data goes on the board for anyone to check.</p>
+        <div class="card arch-card">
+          <div class="arch-controls">
+            <button class="btn primary small" type="button" id="arch-play">▶ Play all</button>
+            <div class="phase-tabs" id="phase-tabs"></div>
+          </div>
+          <svg class="arch" id="arch" viewBox="0 0 1000 520" role="img" aria-label="Architecture diagram"></svg>
+          <ol class="arch-log" id="arch-log"></ol>
+        </div>
+        <div class="trust-grid">
+          <div class="trust"><strong>Voter device</strong><span>Knows: its own RSA private key, its vote, the ballot randomness rᵢ.</span><span>Never sends any of these.</span></div>
+          <div class="trust"><strong>Server</strong><span>Sees: encrypted ballots, public keys, proofs.</span><span>Cannot decrypt (holds no key share), cannot forge a voter signature, cannot change the board unnoticed.</span></div>
+          <div class="trust"><strong>Trustees</strong><span>Each knows one share sⱼ of the decryption exponent.</span><span>Need all k shares together. They only ever decrypt the published totals.</span></div>
+          <div class="trust"><strong>Anyone</strong><span>Can download the board and re-check every signature, proof, hash and the final count.</span></div>
+        </div>
+      </section>
+
+      <!-- 2 -->
+      <section class="lsec" id="keys">
+        <h2><span class="num">2</span>Keys and who holds them</h2>
+        <p>These are the actual public values of the election on this server (or sample values if there is none yet). Hex is shortened. Click a value to expand it.</p>
+        <div class="card">
+          <table class="keys-table">
+            <thead><tr><th>Key</th><th>Algorithm</th><th>Public part</th><th>Secret part, held by</th></tr></thead>
+            <tbody id="keys-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 3 -->
+      <section class="lsec" id="paillier">
+        <h2><span class="num">3</span>Paillier encryption: adding votes without opening them</h2>
+        <div class="two">
+          <div>
+            <p>Key generation picks two large primes p, q and publishes <span class="m">n = p·q</span> (2048 bits) with <span class="m">g = n + 1</span>.
+              To encrypt a message m with fresh randomness r:</p>
+            <div class="formula">c = gᵐ · rⁿ mod n²  =  (1 + m·n) · rⁿ mod n²</div>
+            <p>The rⁿ factor hides m completely, so encrypting the same vote twice gives unrelated ciphertexts. The key property is that
+              multiplying ciphertexts <strong>adds</strong> the plaintexts:</p>
+            <div class="formula">Enc(m₁, r₁) · Enc(m₂, r₂) = Enc(m₁ + m₂, r₁·r₂)</div>
+            <p>So the server multiplies every ballot's ciphertext for a candidate and gets an encryption of that candidate's total,
+              without opening a single ballot.</p>
+          </div>
+          <div class="card toy" id="toy-paillier">
+            <div class="toy-head"><strong>Try it with toy numbers</strong><span class="muted small">p = 7, q = 11, so n = 77, n² = 5929</span></div>
+            <div class="toy-row">
+              <label>m <select id="tp-m"><option>0</option><option selected>1</option><option>2</option><option>3</option></select></label>
+              <label>r <input id="tp-r" type="number" min="1" max="76" value="13"></label>
+              <button class="btn ghost small" type="button" id="tp-rand">random r</button>
+            </div>
+            <ol class="calc" id="tp-steps"></ol>
+            <div class="toy-head"><strong>Homomorphic tally of three ballots</strong></div>
+            <div class="ballots3" id="tp-ballots"></div>
+            <button class="btn small" type="button" id="tp-tally">Multiply and decrypt</button>
+            <ol class="calc" id="tp-tally-steps"></ol>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4 -->
+      <section class="lsec" id="ballot">
+        <h2><span class="num">4</span>The ballot: one-hot encryption plus zero-knowledge proofs</h2>
+        <p>A vote for candidate j out of k becomes a <strong>one-hot vector</strong> with a 1 at position j and 0 everywhere else. Each entry is encrypted separately.
+          Encryption alone would let a cheater encrypt a 5 or a −3, so the browser attaches proofs that convince the server without revealing the vote:</p>
+        <div class="card ballot-anim" id="ballot-anim">
+          <div class="ba-controls">
+            <span class="muted small">Vote for:</span>
+            <div class="ba-cands" id="ba-cands"></div>
+            <button class="btn primary small" type="button" id="ba-play">▶ Encrypt</button>
+          </div>
+          <div class="ba-stage" id="ba-stage"></div>
+        </div>
+        <div class="proof-grid">
+          <div class="card proof">
+            <h3>0-or-1 proof, one per candidate</h3>
+            <p class="small">An OR-proof (Cramer–Damgård–Schoenmakers). Statement: "c encrypts 0 <em>or</em> c encrypts 1". Equivalently, c or c·g⁻¹ is an
+              n-th power. The prover runs the real Σ-protocol on the true branch and <em>simulates</em> the false one by picking its challenge first.
+              The verifier checks <span class="m">e₀ + e₁ = H(…)</span> and <span class="m">zⱼⁿ = aⱼ·uⱼ^eⱼ</span> for both branches. Both look identical, so it cannot tell which was real.</p>
+          </div>
+          <div class="card proof">
+            <h3>Sum proof, one per ballot</h3>
+            <p class="small">The product of all of the ballot's ciphertexts must encrypt exactly 1. With <span class="m">R = Π rᵢ</span>, this means
+              <span class="m">(Π cᵢ)·g⁻¹ = Rⁿ</span>. The voter proves knowledge of that n-th root R. This stops "1 for Alice <em>and</em> 1 for Bob".</p>
+          </div>
+          <div class="card proof">
+            <h3>Fiat–Shamir with context</h3>
+            <p class="small">The verifier's random challenge is replaced by <span class="m">e = SHA-256(domain, n, election id, credential id, candidate, commitments)</span>
+              truncated to 128 bits. Because the credential id is inside the hash, copying someone else's ballot under your credential makes every proof fail.</p>
+          </div>
+        </div>
+        <div class="card live-ballot" id="live-ballot" hidden>
+          <div class="card-title"><h3>A real ballot from this server's board</h3><span class="muted small" id="lb-meta"></span></div>
+          <pre class="json" id="lb-json"></pre>
+        </div>
+      </section>
+
+      <!-- 5 -->
+      <section class="lsec" id="signatures">
+        <h2><span class="num">5</span>Credentials and signatures: who may vote, and once</h2>
+        <div class="two">
+          <div>
+            <ol class="steps-l">
+              <li><strong>Device key.</strong> The voter's browser generates a 2048-bit RSA key pair (n, e = 65537, d). The private exponent d never leaves the device.</li>
+              <li><strong>Registration.</strong> The device sends its public key with a one-time code. The authority signs
+                <span class="m">{election_id, credential_id = SHA-256(public key), voter_public_key}</span>, and that credential goes on the board.</li>
+              <li><strong>Voting.</strong> The ballot body is signed with d. The server, and later anyone, checks the signature against the credential on the board.
+                One credential means one ballot (enforced by the service, a unique database index and the verifier).</li>
+            </ol>
+            <p class="small muted">The scheme is RSASSA-PKCS1-v1_5 with SHA-256 (RFC 8017), written from scratch in Python (<code>crypto/rsa.py</code>) and JS (<code>static/gbcrypto.js</code>).
+              Signing uses the CRT and checks its own result.</p>
+          </div>
+          <div class="card toy" id="toy-rsa">
+            <div class="toy-head"><strong>Sign and verify with toy RSA</strong><span class="muted small">p = 61, q = 53, n = 3233, e = 17, d = 2753</span></div>
+            <label class="field">Message <input id="tr-msg" value="ballot for Bob"></label>
+            <div class="sig-pipe" id="tr-pipe"></div>
+            <div class="toy-row">
+              <button class="btn small" type="button" id="tr-tamper">Tamper with the message</button>
+              <button class="btn ghost small" type="button" id="tr-reset">Reset</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 6 -->
+      <section class="lsec" id="chain">
+        <h2><span class="num">6</span>The bulletin board: a hash chain</h2>
+        <p>Every entry stores the SHA-256 hash of the entry before it: <span class="m">entry_hash = SHA-256(seq, kind, payload, prev_hash)</span>.
+          Editing anything changes that entry's hash, which no longer matches the next entry's prev_hash, and every later link breaks with it.
+          The hashes below are real SHA-256 values, computed in your browser. Edit a block to see the damage spread.</p>
+        <div class="card">
+          <div class="chain-demo" id="chain-demo"></div>
+          <div class="toy-row"><button class="btn ghost small" type="button" id="chain-reset">Repair chain</button>
+            <span class="muted small">In the database, triggers also refuse UPDATE and DELETE, and unique indexes allow one ballot per credential.</span></div>
+        </div>
+      </section>
+
+      <!-- 7 -->
+      <section class="lsec" id="tally">
+        <h2><span class="num">7</span>Tally and threshold decryption</h2>
+        <div class="two">
+          <div>
+            <p>After the polls close, the encrypted total for each candidate is <span class="m">T = Π cᵢ = Enc(Σ mᵢ, R)</span> with <span class="m">R = Π rᵢ</span>.</p>
+            <p><strong>Splitting the key.</strong> With <span class="m">λ = lcm(p−1, q−1)</span>, set <span class="m">e′ = n⁻¹ mod λ</span>.
+              Then <span class="m">(T mod n)^e′ = R</span>, so knowing e′ lets you recover the randomness. At the ceremony e′ is split into additive shares
+              <span class="m">e′ = s₁ + … + sₖ (mod λ)</span>, one per trustee, and p, q, λ and e′ are deleted.</p>
+            <p><strong>Decrypting.</strong> Each trustee recomputes T from the board and publishes <span class="m">Pⱼ = (T mod n)^sⱼ mod n</span>.
+              Multiplying all the partials gives R. Anyone can then check <span class="m">gᵐ · Rⁿ = T (mod n²)</span> and read off m.
+              Since x ↦ xⁿ is one-to-one on ℤₙ*, only the true R and the true m pass this check, so it is a complete, public check.
+              Any k−1 trustees together get nothing usable.</p>
+          </div>
+          <div class="card toy" id="toy-threshold">
+            <div class="toy-head"><strong>Three trustees, toy key</strong><span class="muted small">n = 77, λ = 30, e′ = 77⁻¹ mod 30 = 23</span></div>
+            <div class="shares" id="tt-shares"></div>
+            <ol class="calc" id="tt-steps"></ol>
+            <div class="toy-row">
+              <button class="btn small" type="button" id="tt-run">Decrypt with all 3</button>
+              <button class="btn ghost small" type="button" id="tt-two">Try with only 2</button>
+            </div>
+          </div>
+        </div>
+        <div class="card live-result" id="live-result" hidden>
+          <div class="card-title"><h3>The real tally on this server</h3><span class="muted small" id="lr-meta"></span></div>
+          <div id="lr-body"></div>
+        </div>
+      </section>
+
+      <!-- 8 -->
+      <section class="lsec" id="verify">
+        <h2><span class="num">8</span>Verification and audits</h2>
+        <div class="two">
+          <div>
+            <p><strong>Universal verifiability.</strong> <code>scripts/verify_board.py</code> (and the Verify button) takes only the board and re-checks everything.
+              Here is each check and the attack it catches:</p>
+            <ol class="vchecks" id="vchecks"></ol>
+          </div>
+          <div>
+            <p><strong>Individual verifiability.</strong></p>
+            <ul class="bullets">
+              <li><strong>Recorded as cast:</strong> your receipt is SHA-256 of your signed ballot. Your device computes it too, and you can find it on the board.</li>
+              <li><strong>Cast as intended (Benaloh challenge):</strong> the device seals the ballot and commits to its fingerprint <em>before</em> you choose to cast or audit.
+                An audit reveals every rᵢ, and both the browser and the server's independent Python code re-encrypt your claimed choice. A device that cheats
+                cannot tell whether a ballot will be audited, so it gets caught with high probability over repeated audits.</li>
+              <li><strong>Same board for everyone:</strong> the head hash is shown in the app. Compare it with other observers to detect a server showing different people different boards.</li>
+            </ul>
+            <div class="card attack-run">
+              <strong>Run the attacks yourself</strong>
+              <pre class="term">$ python3 scripts/attack_demo.py
+  ok vote stuffing (ciphertext of 2): rejected by service
+  ok double voting: rejected by service
+  ok ballot copied under another credential: rejected
+  ok forged voter signature: rejected by service
+  ok trustee submits a bad partial decryption: rejected
+  ok 2 of 3 trustees collude to open one ballot: their partials open nothing
+  ok board row edited in the database: verifier FAIL [hash chain]
+  ok server injects a stuffed ballot: verifier FAIL [ballots]
+  ok ballot dropped before tallying: verifier FAIL [homomorphic tally]
+  ok trustee announces a wrong total: verifier FAIL [decryption proofs]
+10/10 attacks caught</pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 9 -->
+      <section class="lsec" id="goals">
+        <h2><span class="num">9</span>Security goals and how each one is met</h2>
+        <div class="card table-wrap">
+          <table class="goals">
+            <thead><tr><th>Goal</th><th>Mechanism</th><th>Enforced in</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Confidentiality</strong> (ballot secrecy)</td><td>Paillier encryption in the voter's browser. The server never sees a vote. Only totals are ever decrypted, and decrypting them needs all k trustees.</td><td><code>static/gbcrypto.js</code>, <code>election/tally.py</code></td></tr>
+              <tr><td><strong>Integrity</strong></td><td>Hash-chained append-only board, plus database triggers and unique indexes, plus a public verifier that recomputes everything.</td><td><code>bulletin_board.py</code>, <code>sqlite_board.py</code>, <code>verifier.py</code></td></tr>
+              <tr><td><strong>Authentication / eligibility</strong></td><td>One-time registration codes (only their hashes are stored). Each credential is signed by the authority and bound to a device key. Each ballot is signed by that device.</td><td><code>authority.py</code>, <code>web/server.py</code></td></tr>
+              <tr><td><strong>One voter, one vote</strong></td><td>The service checks, a unique index in SQLite enforces it, and the verifier re-checks it.</td><td><code>service.py</code>, <code>sqlite_board.py</code>, <code>verifier.py</code></td></tr>
+              <tr><td><strong>Ballot validity</strong></td><td>Zero-knowledge 0-or-1 OR-proofs and a sum proof, bound to the election and credential with Fiat–Shamir.</td><td><code>crypto/sigma.py</code>, <code>crypto/proofs.py</code></td></tr>
+              <tr><td><strong>Non-repudiation / accountability</strong></td><td>Signed credentials and ballots, and per-trustee partials, all public on the board.</td><td><code>crypto/rsa.py</code></td></tr>
+              <tr><td><strong>Universal verifiability</strong></td><td>Anyone can run <code>verify_board.py</code> on the board file. No keys and no trust in the server are needed.</td><td><code>scripts/verify_board.py</code></td></tr>
+              <tr><td><strong>Individual verifiability</strong></td><td>Receipts (recorded as cast) and the Benaloh audit (cast as intended).</td><td><code>static/app.js</code>, <code>/api/audit</code></td></tr>
+              <tr><td><strong>Availability</strong></td><td>Proofs are checked in a process pool outside the lock. POSTs are rate-limited per IP, request bodies are capped, and the board is read incrementally.</td><td><code>web/server.py</code></td></tr>
+              <tr><td><strong>Transport security</strong></td><td>Optional HTTPS (<code>--tls</code>), a strict Content-Security-Policy, nosniff, frame-deny, and no referrer.</td><td><code>scripts/serve.py</code>, <code>web/server.py</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card limits">
+          <h3>Honest limits (what a reviewer should ask about)</h3>
+          <ul class="bullets">
+            <li><strong>Coercion resistance is out of scope.</strong> As in Helios, a voter could prove how they voted by revealing the ballot randomness. Real coercion resistance needs a different protocol (JCJ/Civitas: anonymous credentials, fake credentials and mixnets).</li>
+            <li><strong>Trusted dealer.</strong> One process generates the key and splits it, then deletes it. Distributed generation of a Paillier modulus is possible (Boneh–Franklin style) but much more complex.</li>
+            <li><strong>k-of-k shares.</strong> Every trustee is needed, so one missing trustee delays the result. t-of-k Shamir sharing (Shoup / Damgård–Jurik) would tolerate absences, but needs safe primes.</li>
+            <li><strong>Demo convenience.</strong> In the demo one browser plays every role, so all the secrets sit in one localStorage. In real use each role is a separate device.</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- 10 -->
+      <section class="lsec" id="code">
+        <h2><span class="num">10</span>Where the code lives</h2>
+        <div class="card table-wrap">
+          <table class="goals code-map">
+            <tbody>
+              <tr><td><code>glassballot/crypto/</code></td><td>Number theory, Paillier, RSA, canonical JSON + SHA-256, Fiat–Shamir, Σ-protocols and proofs. Knows nothing about elections.</td></tr>
+              <tr><td><code>glassballot/election/</code></td><td>Parameters, authority (credentials), ballot, bulletin board (JSONL and SQLite), service (accept or reject), tally (threshold decryption), verifier.</td></tr>
+              <tr><td><code>glassballot/web/server.py</code></td><td>Stdlib HTTP API: roles, tokens, process pool, rate limiting, security headers, TLS.</td></tr>
+              <tr><td><code>glassballot/web/static/gbcrypto.js</code></td><td>The browser half: a line-by-line port of the Python crypto, checked against it by <code>tests/test_js_crypto.py</code>.</td></tr>
+              <tr><td><code>glassballot/web/static/worker.js</code></td><td>Web Worker: key generation, encryption, proofs, signing and trustee partials run off the main thread.</td></tr>
+              <tr><td><code>scripts/</code></td><td><code>serve.py</code> (web app), <code>run_demo.py</code> (CLI election), <code>verify_board.py</code> (public verifier), <code>attack_demo.py</code>, <code>load_test.py</code>.</td></tr>
+              <tr><td><code>tests/</code></td><td>Unit tests (crypto, election, threshold, SQLite), HTTP API test, JS↔Python cross-checks, and the headless-Chrome end-to-end flow.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <footer class="wrap foot">Glass Ballot · <a href="/">Open the app</a> · Every number on this page is computed live in your browser.</footer>
+
+  <script src="gbcrypto.js"></script>
+  <script src="learn.js"></script>
+</body>
+</html>
